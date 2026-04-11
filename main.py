@@ -1,9 +1,12 @@
 from typing import List, Optional
 import json
 import asyncio
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 app = FastAPI()
 
@@ -26,11 +29,11 @@ clients: List[WebSocket] = []
 
 
 # ==============================
-# ROOT (IMPORTANT)
+# HEALTH CHECK
 # ==============================
-@app.get("/")
-def root():
-    return {"status": "ASV backend running"}
+@app.get("/api/status")
+def status():
+    return {"status": "ASV backend running", "clients": len(clients), "device": device is not None}
 
 
 # ==============================
@@ -48,7 +51,6 @@ async def device_ws(websocket: WebSocket):
         while True:
             msg = await websocket.receive()
 
-            # Disconnect case
             if msg.get("type") == "websocket.disconnect":
                 break
 
@@ -63,19 +65,16 @@ async def device_ws(websocket: WebSocket):
                 except Exception:
                     msg_type = ""
 
-                # Heartbeat
                 if msg_type == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))
                     continue
 
-                # Broadcast to all clients
                 dead = []
                 for client in clients:
                     try:
                         await client.send_text(text)
                     except Exception:
                         dead.append(client)
-
                 for c in dead:
                     if c in clients:
                         clients.remove(c)
@@ -88,7 +87,6 @@ async def device_ws(websocket: WebSocket):
                         await client.send_bytes(data)
                     except Exception:
                         dead.append(client)
-
                 for c in dead:
                     if c in clients:
                         clients.remove(c)
@@ -102,13 +100,12 @@ async def device_ws(websocket: WebSocket):
 
 
 # ==============================
-# CLIENT (FRONTEND)
+# CLIENT (BROWSER)
 # ==============================
 @app.websocket("/ws/client")
 async def client_ws(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
-
     print(f"🌐 Client connected ({len(clients)})", flush=True)
 
     try:
@@ -120,7 +117,6 @@ async def client_ws(websocket: WebSocket):
 
             text = msg.get("text")
 
-            # Forward commands → device
             if text is not None and device:
                 try:
                     await device.send_text(text)
@@ -128,7 +124,7 @@ async def client_ws(websocket: WebSocket):
                     print("⚠️ Failed to send to device", flush=True)
 
     except WebSocketDisconnect:
-        print("Client disconnected", flush=True)
+        pass
 
     except Exception as e:
         print(f"❌ Client error: {e}", flush=True)
@@ -136,5 +132,12 @@ async def client_ws(websocket: WebSocket):
     finally:
         if websocket in clients:
             clients.remove(websocket)
-
         print(f"🔌 Client removed ({len(clients)} left)", flush=True)
+
+
+# ==============================
+# STATIC FRONTEND (must be last)
+# ==============================
+_dist = os.path.join(os.path.dirname(__file__), "dist")
+if os.path.isdir(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
