@@ -1,4 +1,5 @@
 from typing import List, Optional
+import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -30,7 +31,19 @@ async def device_ws(websocket: WebSocket):
             data = msg.get("bytes")
 
             if text is not None:
-                # Telemetry / camera (base64 JSON) — broadcast to all clients
+                import json as _json
+                try:
+                    parsed = _json.loads(text)
+                    msg_type = parsed.get("type", "")
+                except Exception:
+                    msg_type = ""
+
+                # Echo heartbeat back so Render proxy sees bidirectional traffic
+                if msg_type == "ping":
+                    await websocket.send_text('{"type":"pong"}')
+                    continue
+
+                # All other text → broadcast to clients
                 dead = []
                 for client in clients:
                     try:
@@ -38,10 +51,11 @@ async def device_ws(websocket: WebSocket):
                     except Exception:
                         dead.append(client)
                 for c in dead:
-                    clients.remove(c)
+                    if c in clients:
+                        clients.remove(c)
 
             elif data is not None:
-                # Binary camera frame — broadcast to all clients
+                # Binary frame → broadcast to clients
                 dead = []
                 for client in clients:
                     try:
@@ -49,7 +63,8 @@ async def device_ws(websocket: WebSocket):
                     except Exception:
                         dead.append(client)
                 for c in dead:
-                    clients.remove(c)
+                    if c in clients:
+                        clients.remove(c)
 
     except WebSocketDisconnect:
         print("Device disconnected", flush=True)
@@ -70,7 +85,7 @@ async def client_ws(websocket: WebSocket):
             msg = await websocket.receive()
             text = msg.get("text")
 
-            # Joystick commands from browser → forward to device
+            # Joystick/joy commands from browser → forward to device
             if text is not None and device:
                 try:
                     await device.send_text(text)
