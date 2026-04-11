@@ -27,6 +27,11 @@ async def device_ws(websocket: WebSocket):
     try:
         while True:
             msg = await websocket.receive()
+
+            # Handle clean disconnect from client side
+            if msg.get("type") == "websocket.disconnect":
+                break
+
             text = msg.get("text")
             data = msg.get("bytes")
 
@@ -83,6 +88,10 @@ async def client_ws(websocket: WebSocket):
     try:
         while True:
             msg = await websocket.receive()
+
+            if msg.get("type") == "websocket.disconnect":
+                break
+
             text = msg.get("text")
 
             # Joystick/joy commands from browser → forward to device
