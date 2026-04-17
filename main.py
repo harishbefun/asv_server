@@ -27,6 +27,7 @@ app.add_middleware(
 device: Optional[WebSocket] = None
 clients: List[WebSocket] = []
 _mission: dict = {}   # last uploaded mission, re-sent to new browser clients
+_health:  dict = {}   # last health snapshot, re-sent to new browser clients
 
 
 # ==============================
@@ -133,10 +134,15 @@ async def client_ws(websocket: WebSocket):
     clients.append(websocket)
     print(f"🌐 Client connected ({len(clients)})", flush=True)
 
-    # Send any already-uploaded mission immediately so the browser sees it on load
+    # Replay last known mission and health to newly-connected browsers
     if _mission:
         try:
             await websocket.send_text(json.dumps({"type": "mission", **_mission}))
+        except Exception:
+            pass
+    if _health:
+        try:
+            await websocket.send_text(json.dumps(_health))
         except Exception:
             pass
 
@@ -165,6 +171,40 @@ async def client_ws(websocket: WebSocket):
         if websocket in clients:
             clients.remove(websocket)
         print(f"🔌 Client removed ({len(clients)} left)", flush=True)
+
+
+# ==============================
+# JETSON HEALTH  (Jetson → server → browsers)
+# ==============================
+@app.websocket("/ws/health")
+async def health_ws(websocket: WebSocket):
+    global _health
+    await websocket.accept()
+    print("💻 Health monitor connected", flush=True)
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text:
+                try:
+                    _health = json.loads(text)
+                except Exception:
+                    continue
+                dead = []
+                for client in clients:
+                    try:
+                        await client.send_text(text)
+                    except Exception:
+                        dead.append(client)
+                for c in dead:
+                    if c in clients:
+                        clients.remove(c)
+    except Exception as e:
+        print(f"❌ Health monitor error: {e}", flush=True)
+    finally:
+        print("💻 Health monitor disconnected", flush=True)
 
 
 # ==============================
