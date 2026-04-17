@@ -3,7 +3,7 @@ import json
 import asyncio
 import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -26,6 +26,7 @@ app.add_middleware(
 # ==============================
 device: Optional[WebSocket] = None
 clients: List[WebSocket] = []
+_mission: dict = {}   # last uploaded mission, re-sent to new browser clients
 
 
 # ==============================
@@ -34,6 +35,30 @@ clients: List[WebSocket] = []
 @app.get("/api/status")
 def status():
     return {"status": "ASV backend running", "clients": len(clients), "device": device is not None}
+
+
+# ==============================
+# MISSION PLAN  (POST from Jetson, GET from browser)
+# ==============================
+@app.post("/api/mission")
+async def upload_mission(payload: dict = Body(...)):
+    global _mission
+    _mission = payload
+    msg = json.dumps({"type": "mission", **payload})
+    dead = []
+    for client in clients:
+        try:
+            await client.send_text(msg)
+        except Exception:
+            dead.append(client)
+    for c in dead:
+        if c in clients:
+            clients.remove(c)
+    return {"status": "ok", "clients_notified": len(clients) - len(dead)}
+
+@app.get("/api/mission")
+def get_mission():
+    return _mission
 
 
 # ==============================
@@ -107,6 +132,13 @@ async def client_ws(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
     print(f"🌐 Client connected ({len(clients)})", flush=True)
+
+    # Send any already-uploaded mission immediately so the browser sees it on load
+    if _mission:
+        try:
+            await websocket.send_text(json.dumps({"type": "mission", **_mission}))
+        except Exception:
+            pass
 
     try:
         while True:
