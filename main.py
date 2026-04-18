@@ -168,7 +168,8 @@ async def client_ws(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "pong", "ts": parsed.get("ts")}))
                     continue
 
-                if msg_type in ("mission_request", "regenerate_path"):
+                if msg_type in ("mission_request", "regenerate_path",
+                                "start_simulation", "stop_simulation"):
                     if mission_worker:
                         try:
                             await mission_worker.send_text(text)
