@@ -24,7 +24,8 @@ app.add_middleware(
 # ==============================
 # GLOBAL STATE
 # ==============================
-device: Optional[WebSocket] = None
+device:         Optional[WebSocket] = None
+mission_worker: Optional[WebSocket] = None
 clients: List[WebSocket] = []
 _mission: dict = {}   # last uploaded mission, re-sent to new browser clients
 _health:  dict = {}   # last health snapshot, re-sent to new browser clients
@@ -156,14 +157,30 @@ async def client_ws(websocket: WebSocket):
             text = msg.get("text")
 
             if text is not None:
-                # Respond to browser pings directly (don't forward to device)
                 try:
                     parsed = json.loads(text)
-                    if parsed.get("type") == "ping":
-                        await websocket.send_text(json.dumps({"type": "pong", "ts": parsed.get("ts")}))
-                        continue
+                    msg_type = parsed.get("type", "")
                 except Exception:
-                    pass
+                    msg_type = ""
+                    parsed = {}
+
+                if msg_type == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong", "ts": parsed.get("ts")}))
+                    continue
+
+                if msg_type == "mission_request":
+                    if mission_worker:
+                        try:
+                            await mission_worker.send_text(text)
+                        except Exception:
+                            print("⚠️ Failed to send to mission worker", flush=True)
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "mission_status", "status": "error",
+                            "msg": "Mission service not connected on Jetson"
+                        }))
+                    continue
+
                 if device:
                     try:
                         await device.send_text(text)
@@ -214,6 +231,39 @@ async def health_ws(websocket: WebSocket):
         print(f"❌ Health monitor error: {e}", flush=True)
     finally:
         print("💻 Health monitor disconnected", flush=True)
+
+
+# ==============================
+# MISSION WORKER  (Jetson mission generator)
+# ==============================
+@app.websocket("/ws/mission_worker")
+async def mission_worker_ws(websocket: WebSocket):
+    global mission_worker
+    await websocket.accept()
+    mission_worker = websocket
+    print("🗺️ Mission worker connected", flush=True)
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text:
+                # Forward status updates from Jetson → all browser clients
+                dead = []
+                for client in clients:
+                    try:
+                        await client.send_text(text)
+                    except Exception:
+                        dead.append(client)
+                for c in dead:
+                    if c in clients:
+                        clients.remove(c)
+    except Exception as e:
+        print(f"❌ Mission worker error: {e}", flush=True)
+    finally:
+        mission_worker = None
+        print("🗺️ Mission worker disconnected", flush=True)
 
 
 # ==============================
