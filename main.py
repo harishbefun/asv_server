@@ -155,11 +155,20 @@ async def client_ws(websocket: WebSocket):
 
             text = msg.get("text")
 
-            if text is not None and device:
+            if text is not None:
+                # Respond to browser pings directly (don't forward to device)
                 try:
-                    await device.send_text(text)
+                    parsed = json.loads(text)
+                    if parsed.get("type") == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong", "ts": parsed.get("ts")}))
+                        continue
                 except Exception:
-                    print("⚠️ Failed to send to device", flush=True)
+                    pass
+                if device:
+                    try:
+                        await device.send_text(text)
+                    except Exception:
+                        print("⚠️ Failed to send to device", flush=True)
 
     except WebSocketDisconnect:
         pass
