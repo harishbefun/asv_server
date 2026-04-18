@@ -26,6 +26,7 @@ app.add_middleware(
 # ==============================
 device:         Optional[WebSocket] = None
 mission_worker: Optional[WebSocket] = None
+auto_pilot:     Optional[WebSocket] = None
 clients: List[WebSocket] = []
 _mission: dict = {}   # last uploaded mission, re-sent to new browser clients
 _health:  dict = {}   # last health snapshot, re-sent to new browser clients
@@ -168,6 +169,20 @@ async def client_ws(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "pong", "ts": parsed.get("ts")}))
                     continue
 
+                if msg_type in ("start_autonomous", "stop_autonomous"):
+                    if auto_pilot:
+                        try:
+                            await auto_pilot.send_text(text)
+                        except Exception:
+                            print("⚠️ Failed to send to auto_pilot", flush=True)
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "autonomous_status", "status": "error",
+                            "log": "Autonomous pilot not connected on Jetson",
+                            "level": "error",
+                        }))
+                    continue
+
                 if msg_type in ("mission_request", "regenerate_path",
                                 "start_simulation", "stop_simulation"):
                     if mission_worker:
@@ -265,6 +280,38 @@ async def mission_worker_ws(websocket: WebSocket):
     finally:
         mission_worker = None
         print("🗺️ Mission worker disconnected", flush=True)
+
+
+# ==============================
+# AUTO PILOT  (Jetson autonomous mission runner)
+# ==============================
+@app.websocket("/ws/auto_pilot")
+async def auto_pilot_ws(websocket: WebSocket):
+    global auto_pilot
+    await websocket.accept()
+    auto_pilot = websocket
+    print("🤖 Auto-pilot connected", flush=True)
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text:
+                dead = []
+                for client in clients:
+                    try:
+                        await client.send_text(text)
+                    except Exception:
+                        dead.append(client)
+                for c in dead:
+                    if c in clients:
+                        clients.remove(c)
+    except Exception as e:
+        print(f"❌ Auto-pilot error: {e}", flush=True)
+    finally:
+        auto_pilot = None
+        print("🤖 Auto-pilot disconnected", flush=True)
 
 
 # ==============================
