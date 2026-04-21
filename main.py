@@ -27,6 +27,7 @@ app.add_middleware(
 device:         Optional[WebSocket] = None
 mission_worker: Optional[WebSocket] = None
 auto_pilot:     Optional[WebSocket] = None
+obstacle_ws:    Optional[WebSocket] = None
 clients: List[WebSocket] = []
 _mission: dict = {}   # last uploaded mission, re-sent to new browser clients
 _health:  dict = {}   # last health snapshot, re-sent to new browser clients
@@ -280,6 +281,18 @@ async def mission_worker_ws(websocket: WebSocket):
     finally:
         mission_worker = None
         print("🗺️ Mission worker disconnected", flush=True)
+        # Tell all browsers the worker went offline
+        dead = []
+        for client in clients:
+            try:
+                await client.send_text(json.dumps({
+                    "type": "mission_status", "status": "offline",
+                    "msg": "Mission service disconnected from Jetson"
+                }))
+            except Exception:
+                dead.append(client)
+        for c in dead:
+            if c in clients: clients.remove(c)
 
 
 # ==============================
@@ -312,6 +325,38 @@ async def auto_pilot_ws(websocket: WebSocket):
     finally:
         auto_pilot = None
         print("🤖 Auto-pilot disconnected", flush=True)
+
+
+# ==============================
+# OBSTACLE DETECTOR  (Jetson SegFormer → browsers)
+# ==============================
+@app.websocket("/ws/obstacle")
+async def obstacle_ws_handler(websocket: WebSocket):
+    global obstacle_ws
+    await websocket.accept()
+    obstacle_ws = websocket
+    print("👁️ Obstacle detector connected", flush=True)
+    try:
+        while True:
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            text = msg.get("text")
+            if text:
+                dead = []
+                for client in clients:
+                    try:
+                        await client.send_text(text)
+                    except Exception:
+                        dead.append(client)
+                for c in dead:
+                    if c in clients:
+                        clients.remove(c)
+    except Exception as e:
+        print(f"❌ Obstacle detector error: {e}", flush=True)
+    finally:
+        obstacle_ws = None
+        print("👁️ Obstacle detector disconnected", flush=True)
 
 
 # ==============================
