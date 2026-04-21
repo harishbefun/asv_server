@@ -38,7 +38,7 @@ _health:  dict = {}   # last health snapshot, re-sent to new browser clients
 # ==============================
 @app.get("/api/status")
 def status():
-    return {"status": "ASV backend running", "clients": len(clients), "device": device is not None}
+    return {"status": "ASV backend running", "clients": len(clients), "device": device is not None, "mission_worker": mission_worker is not None}
 
 
 # ==============================
@@ -125,7 +125,8 @@ async def device_ws(websocket: WebSocket):
 
     finally:
         print("⚠️ Device disconnected", flush=True)
-        device = None
+        if device is websocket:
+            device = None
 
 
 # ==============================
@@ -279,7 +280,8 @@ async def mission_worker_ws(websocket: WebSocket):
     except Exception as e:
         print(f"❌ Mission worker error: {e}", flush=True)
     finally:
-        mission_worker = None
+        if mission_worker is websocket:
+            mission_worker = None
         print("🗺️ Mission worker disconnected", flush=True)
         # Tell all browsers the worker went offline
         dead = []
@@ -323,7 +325,8 @@ async def auto_pilot_ws(websocket: WebSocket):
     except Exception as e:
         print(f"❌ Auto-pilot error: {e}", flush=True)
     finally:
-        auto_pilot = None
+        if auto_pilot is websocket:
+            auto_pilot = None
         print("🤖 Auto-pilot disconnected", flush=True)
 
 
@@ -355,7 +358,8 @@ async def obstacle_ws_handler(websocket: WebSocket):
     except Exception as e:
         print(f"❌ Obstacle detector error: {e}", flush=True)
     finally:
-        obstacle_ws = None
+        if obstacle_ws is websocket:
+            obstacle_ws = None
         print("👁️ Obstacle detector disconnected", flush=True)
 
 
