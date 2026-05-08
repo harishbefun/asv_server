@@ -50,7 +50,7 @@ async def upload_mission(payload: dict = Body(...)):
     _mission = payload
     msg = json.dumps({"type": "mission", **payload})
     dead = []
-    for client in clients:
+    for client in list(clients):
         try:
             await client.send_text(msg)
         except Exception:
@@ -99,7 +99,7 @@ async def device_ws(websocket: WebSocket):
                     continue
 
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_text(text)
                     except Exception:
@@ -111,7 +111,7 @@ async def device_ws(websocket: WebSocket):
             # ---------- BINARY ----------
             elif data is not None:
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_bytes(data)
                     except Exception:
@@ -237,7 +237,7 @@ async def health_ws(websocket: WebSocket):
                 except Exception:
                     continue
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_text(text)
                     except Exception:
@@ -269,7 +269,7 @@ async def mission_worker_ws(websocket: WebSocket):
             if text:
                 # Forward status updates from Jetson → all browser clients
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_text(text)
                     except Exception:
@@ -285,7 +285,7 @@ async def mission_worker_ws(websocket: WebSocket):
         print("🗺️ Mission worker disconnected", flush=True)
         # Tell all browsers the worker went offline
         dead = []
-        for client in clients:
+        for client in list(clients):
             try:
                 await client.send_text(json.dumps({
                     "type": "mission_status", "status": "offline",
@@ -314,7 +314,7 @@ async def auto_pilot_ws(websocket: WebSocket):
             text = msg.get("text")
             if text:
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_text(text)
                     except Exception:
@@ -347,7 +347,7 @@ async def obstacle_ws_handler(websocket: WebSocket):
             text = msg.get("text")
             if text:
                 dead = []
-                for client in clients:
+                for client in list(clients):
                     try:
                         await client.send_text(text)
                     except Exception:
